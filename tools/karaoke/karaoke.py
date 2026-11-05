@@ -108,65 +108,114 @@ def html(v):
 <img class="hand" id="hand" src="{HAND}"></div></div>
 <div class="foot"><div class="row"><img class="logo" src="{LOGO}"><div class="cta">Скласти мій план</div></div><div class="site">onmind.coach</div></div></div></body></html>"""
 
-JS = """([t, pops, wps]) => {
- const words=[...document.querySelectorAll('.w')]; const n=words.length;
- const lead=0.8; const k=Math.floor((t-lead)*wps); const cur=Math.min(n-1, Math.max(-1,k));
+
+import wave, struct, tempfile, os
+PIPER = HERE / 'piper' / 'piper' / 'piper'; VOICE = HERE / 'piper' / 'en-us-lessac-medium.onnx'
+SR = 22050
+def tts(text, path):
+    subprocess.run([str(PIPER), '--model', str(VOICE), '--length_scale', '1.12', '--sentence_silence', '0.0', '--output_file', str(path)],
+                   input=text.encode(), check=True, capture_output=True)
+    with wave.open(str(path)) as w: return w.getnframes() / w.getframerate()
+
+def build_audio(v, workdir):
+    """Synthesises each sentence, measures word end times with cumulative prefixes, inserts a pause after pop words.
+    Returns (word_times [(start,end)], total_seconds, wav_path)."""
+    LEAD, GAP, HOLD, TAIL = 0.8, 0.35, 1.3, 1.6
+    import numpy as np
+    out = [np.zeros(int(LEAD * SR), dtype=np.int16)]
+    t = LEAD; times = []
+    for si, (en, _) in enumerate(v['text']):
+        words = en.split(' ')
+        full = workdir / f's{si}.wav'; dur = tts(en, full)
+        # word boundaries from prefixes
+        ends = []
+        for i in range(1, len(words)):
+            d = tts(' '.join(words[:i]), workdir / 'p.wav')
+            ends.append(min(d - 0.18, dur))  # prefixes end with a trailing pause; trim it
+        ends.append(dur)
+        with wave.open(str(full)) as w: data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        cursor = 0.0; start_t = t
+        for i, w_ in enumerate(words):
+            a, z = cursor, ends[i]
+            key = ''.join(c for c in w_ if c.isalpha() or c == "'").lower()
+            times.append((t + a - cursor + (0), t + (z - cursor)))  # placeholder, fixed below
+            cursor = z
+        # rebuild with pauses: simpler, walk again
+        times = times[:-len(words)]
+        cursor = 0.0
+        for i, w_ in enumerate(words):
+            z = ends[i]
+            seg = data[int(cursor * SR):int(z * SR)]
+            out.append(seg); times.append((t, t + (z - cursor))); t += (z - cursor)
+            key = ''.join(c for c in w_ if c.isalpha() or c == "'").lower()
+            if key in v['pops']:
+                out.append(np.zeros(int(HOLD * SR), dtype=np.int16)); t += HOLD
+            cursor = z
+        out.append(np.zeros(int(GAP * SR), dtype=np.int16)); t += GAP
+    out.append(np.zeros(int(TAIL * SR), dtype=np.int16)); t += TAIL
+    audio = np.concatenate(out)
+    wav = workdir / 'voice.wav'
+    with wave.open(str(wav), 'wb') as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(audio.tobytes())
+    return times, t, wav
+
+RECTS = """() => { const card=document.getElementById('card').getBoundingClientRect();
+ return [...document.querySelectorAll('.w')].map(w=>{const r=w.getBoundingClientRect(); return {x:r.left-card.left+r.width/2, y:r.top-card.top+r.height*0.95, w:r.width, cw:card.width, txt:w.textContent};}); }"""
+JS = """([cur, hx, hy, rot, popIdx, pops]) => {
+ const words=[...document.querySelectorAll('.w')];
  words.forEach((w,i)=>{ w.classList.toggle('on', i===cur); w.classList.toggle('done', i<cur); });
- const card=document.getElementById('card').getBoundingClientRect();
  const hand=document.getElementById('hand'), pop=document.getElementById('pop');
  if (cur<0) { hand.style.opacity=0; pop.style.opacity=0; return; }
- const r=words[cur].getBoundingClientRect();
- // finger tip at the word's bottom centre; hand image tip is at about (33%, 2%) of the image
- const x=r.left-card.left+r.width/2, y=r.top-card.top+r.height*0.95;
- hand.style.opacity=1; hand.style.left=(x-250*0.33+6)+'px'; hand.style.top=(y-250*1.357*0.03)+'px'; hand.style.transform='rotate(-10deg)';
- // word card: hold on a pop word for 1.1 s of its 1/wps slot... we pause reading instead: handled in python by a time warp
- const txt=words[cur].textContent.replace(/[^A-Za-z']/g,'').toLowerCase();
- const p=pops[txt];
- if (p) { document.getElementById('pw').textContent=txt; document.getElementById('pp').textContent=p[0]; document.getElementById('pt').textContent=p[1];
+ hand.style.opacity=1; hand.style.left=(hx-250*0.33+6)+'px'; hand.style.top=(hy-250*1.357*0.03)+'px'; hand.style.transform='rotate('+rot+'deg)';
+ if (popIdx>=0) { const r=words[popIdx].getBoundingClientRect(), card=document.getElementById('card').getBoundingClientRect();
+   const txt=words[popIdx].textContent.replace(/[^A-Za-z']/g,'').toLowerCase(); const p=pops[txt];
+   document.getElementById('pw').textContent=txt; document.getElementById('pp').textContent=p[0]; document.getElementById('pt').textContent=p[1];
+   const x=r.left-card.left+r.width/2, y=r.top-card.top+r.height*0.95;
    pop.style.opacity=1; pop.style.left=Math.max(10, Math.min(card.width-580, x-280))+'px'; pop.style.top=(y+70)+'px'; }
  else pop.style.opacity=0;
 }"""
-
-def timeline(v):
-    # Reading time per word is 1/WPS, except pop words, which hold for 1.6 s so the card can be read.
-    n = sum(len(en.split(' ')) for en, _ in v['text'])
-    t = 0.8; times = []
-    wi = 0
-    for en, _ in v['text']:
-        for w in en.split(' '):
-            key = ''.join(c for c in w if c.isalpha() or c == "'").lower()
-            dur = 1.6 if key in v['pops'] else 1 / WPS
-            times.append((t, t + dur)); t += dur; wi += 1
-        t += 0.25  # breath between sentences
-    return times, t + 1.4  # tail hold
+ease = lambda x: 0 if x <= 0 else 1 if x >= 1 else (3*x*x - 2*x*x*x)
 
 def main():
+  import math
   with sync_playwright() as pw:
-      b = pw.chromium.launch(); pg = b.new_page(viewport={'width': 1080, 'height': 1920})
-      for v in VIDEOS:
-          times, total = timeline(v)
-          fr = OUT / 'frames'; shutil.rmtree(fr, ignore_errors=True); fr.mkdir()
-          pg.set_content(html(v)); pg.evaluate('document.fonts.ready'); pg.wait_for_timeout(250)
-          nf = int(total * FPS)
-          for f in range(nf):
-              t = f / FPS
-              cur = -1
-              for i, (a, z) in enumerate(times):
-                  if a <= t < z: cur = i
-              if t >= times[-1][1]: cur = len(times) - 1
-              # drive by index: feed a synthetic time so that floor((t-lead)*wps) == cur
-              pg.evaluate(JS, [0.8 + (cur + 0.5) / WPS if cur >= 0 else 0, v['pops'], WPS])
-              pg.screenshot(path=str(fr / f'{f:04d}.jpg'), type='jpeg', quality=92, clip=dict(x=0, y=0, width=1080, height=1920))
-          mp4 = OUT / f"{v['id']}.mp4"
-          subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-framerate', str(FPS), '-i', str(fr / '%04d.jpg'),
-                          '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-shortest',
-                          '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-preset', 'medium', '-movflags', '+faststart', '-c:a', 'aac', str(mp4)], check=True)
-          shutil.copy(fr / f'{int(2.5*FPS):04d}.jpg', OUT / f"{v['id']}_thumb.jpg")
-          for s, nme in [(1, 'a'), (int(total*0.4), 'b'), (int(total*0.7), 'c')]:
-              shutil.copy(fr / f'{min(nf-1, s*FPS):04d}.jpg', OUT / f"{v['id']}_{nme}.jpg")
-          shutil.rmtree(fr)
-          print(v['id'], round(total, 1), 's')
-      b.close()
+    b = pw.chromium.launch(); pg = b.new_page(viewport={'width': 1080, 'height': 1920})
+    for v in VIDEOS:
+        work = OUT / ('work_' + v['id']); shutil.rmtree(work, ignore_errors=True); work.mkdir()
+        times, total, wav = build_audio(v, work)
+        fr = OUT / 'frames'; shutil.rmtree(fr, ignore_errors=True); fr.mkdir()
+        pg.set_content(html(v)); pg.evaluate('document.fonts.ready'); pg.wait_for_timeout(250)
+        rects = pg.evaluate(RECTS)
+        keys = [''.join(c for c in r['txt'] if c.isalpha() or c == "'").lower() for r in rects]
+        nf = int(total * FPS)
+        for f in range(nf):
+            t = f / FPS
+            cur = -1
+            for i, (a, z) in enumerate(times):
+                if t >= a: cur = i
+            if cur < 0:
+                pg.evaluate(JS, [-1, 0, 0, 0, -1, v['pops']])
+            else:
+                a, z = times[cur]
+                # glide from the previous word to this one over the first 55% of the word, eased; small vertical lift mid glide
+                prev = rects[cur-1] if cur > 0 else rects[cur]
+                frac = ease(min(1, (t - a) / max(0.12, (z - a) * 0.55)))
+                hx = prev['x'] + (rects[cur]['x'] - prev['x']) * frac
+                hy = prev['y'] + (rects[cur]['y'] - prev['y']) * frac + (-14 * math.sin(frac * math.pi))
+                rot = -10 + 3 * math.sin(frac * math.pi) + 1.2 * math.sin(t * 2.1)
+                # word card: shown during the hold after a pop word (from the word's end until the next word starts)
+                popIdx = -1
+                if keys[cur] in v['pops'] and t >= z - 0.15 and (cur + 1 >= len(times) or t < times[cur+1][0]):
+                    popIdx = cur
+                pg.evaluate(JS, [cur, hx, hy, rot, popIdx, v['pops']])
+            pg.screenshot(path=str(fr / f'{f:04d}.jpg'), type='jpeg', quality=92, clip=dict(x=0, y=0, width=1080, height=1920))
+        mp4 = OUT / f"{v['id']}.mp4"
+        subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-framerate', str(FPS), '-i', str(fr / '%04d.jpg'), '-i', str(wav),
+                        '-af', 'aresample=48000,volume=1.4', '-shortest',
+                        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-preset', 'medium', '-movflags', '+faststart', '-c:a', 'aac', '-b:a', '128k', str(mp4)], check=True)
+        shutil.copy(fr / f'{int(2.5*FPS):04d}.jpg', OUT / f"{v['id']}_thumb.jpg")
+        shutil.rmtree(fr); shutil.rmtree(work)
+        print(v['id'], round(total, 1), 's', flush=True)
+    b.close()
 
-
-if __name__=='__main__': main()
+if __name__ == '__main__': main()
