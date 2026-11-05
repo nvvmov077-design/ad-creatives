@@ -58,35 +58,35 @@ VIDEOS = [
             ('She had nothing to do, and she was bored.', 'Їй не було чого робити, і їй було нудно.'),
             ('Suddenly a white rabbit with pink eyes ran past her.', 'Раптом повз неї пробіг білий кролик з рожевими очима.'),
             ('The rabbit took a watch out of its pocket and looked at it.', 'Кролик дістав з кишені годинник і подивився на нього.')],
-      pops={'bank': ('/bæŋk/', 'берег'), 'bored': ('/bɔːrd/', 'знуджена'), 'pocket': ('/ˈpɒkɪt/', 'кишеня')}),
+      pops={'bored': ('/bɔːrd/', 'знуджена')}),
  dict(id='OMD_Read_Dorian_V1_2645', cover='dorian', author='Оскар Вайлд', title='The Picture of Dorian Gray',
       eyebrow='Англійська через книжки', head=['Читай класику', 'англійською'], hs=84,
       text=[('Basil Hallward is a talented artist who lives in London.', 'Безіл Голворд, талановитий художник, живе в Лондоні.'),
             ('He enjoys painting portraits of people.', 'Він любить малювати портрети людей.'),
             ('One afternoon Basil finishes a portrait of a young man.', 'Одного дня Безіл закінчує портрет молодого чоловіка.'),
             ('The young man is extremely beautiful.', 'Молодий чоловік надзвичайно гарний.')],
-      pops={'talented': ('/ˈtæləntɪd/', 'талановитий'), 'portraits': ('/ˈpɔːrtrɪts/', 'портрети'), 'extremely': ('/ɪkˈstriːmli/', 'надзвичайно')}),
+      pops={'portraits': ('/ˈpɔːrtrɪts/', 'портрети')}),
  dict(id='OMD_Read_Iliad_V1_2645', cover='iliad', author='Гомер', title='The Iliad',
       eyebrow='Англійська без словника', head=['Не знаєш слово?', 'Просто торкнись'], hs=84,
       text=[("Achilles' closest friend was Patroclus.", 'Найближчим другом Ахілла був Патрокл.'),
             ('He could not watch the Greeks suffer any longer.', 'Він більше не міг дивитися, як страждають греки.'),
             ('He went to Achilles and begged him to help.', 'Він пішов до Ахілла і благав його допомогти.'),
             ('The plan worked.', 'План спрацював.')],
-      pops={'closest': ('/ˈkloʊsɪst/', 'найближчий'), 'suffer': ('/ˈsʌfər/', 'страждати'), 'begged': ('/beɡd/', 'благав')}),
+      pops={'suffer': ('/ˈsʌfər/', 'страждати')}),
  dict(id='OMD_Read_Sherlock_V1_2645', cover='sherlock', author='Артур Конан Дойл', title='The Adventures of Sherlock Holmes',
       eyebrow='Навчання для зайнятих людей', head=['10 хвилин книжки', 'англійською в день'], hs=76,
       text=[('It was a cold night in March.', 'Була холодна березнева ніч.'),
             ('Sherlock Holmes sat by the fire with his pipe.', 'Шерлок Холмс сидів біля каміна зі своєю люлькою.'),
             ('A letter lay on the table in front of him.', 'Перед ним на столі лежав лист.'),
             ('“We will have a visitor tonight,” he said.', '«Сьогодні ввечері в нас буде гість», сказав він.')],
-      pops={'pipe': ('/paɪp/', 'люлька'), 'letter': ('/ˈletər/', 'лист'), 'visitor': ('/ˈvɪzɪtər/', 'гість')}),
+      pops={'pipe': ('/paɪp/', 'люлька')}),
  dict(id='OMD_Read_Crusoe_V1_2645', cover='crusoe', author='Даніель Дефо', title='Robinson Crusoe',
       eyebrow='Англійська через книжки', head=['Твоя перша книжка', 'англійською'], hs=84,
       text=[('The ship broke on the rocks in the storm.', 'Корабель розбився об скелі під час шторму.'),
             ('I swam to the shore and fell on the sand.', 'Я доплив до берега і впав на пісок.'),
             ('I was alive, but I was alone on the island.', 'Я був живий, але я був сам на острові.'),
             ('The next morning I began to build a shelter.', 'Наступного ранку я почав будувати укриття.')],
-      pops={'storm': ('/stɔːrm/', 'шторм'), 'shore': ('/ʃɔːr/', 'берег'), 'shelter': ('/ˈʃeltər/', 'укриття')}),
+      pops={'shelter': ('/ˈʃeltər/', 'укриття')}),
 ]
 
 def html(v):
@@ -110,10 +110,10 @@ def html(v):
 
 
 import wave, struct, tempfile, os
-PIPER = HERE / 'piper' / 'piper' / 'piper'; VOICE = HERE / 'piper' / 'en-us-lessac-medium.onnx'
+PIPER = HERE / 'piper' / 'piper' / 'piper'; VOICE = HERE / 'piper' / 'en-us-ryan-high.onnx'
 SR = 22050
 def tts(text, path):
-    subprocess.run([str(PIPER), '--model', str(VOICE), '--length_scale', '1.12', '--sentence_silence', '0.0', '--output_file', str(path)],
+    subprocess.run([str(PIPER), '--model', str(VOICE), '--length_scale', '1.38', '--sentence_silence', '0.0', '--output_file', str(path)],
                    input=text.encode(), check=True, capture_output=True)
     with wave.open(str(path)) as w: return w.getnframes() / w.getframerate()
 
@@ -149,7 +149,11 @@ def build_audio(v, workdir):
             out.append(seg); times.append((t, t + (z - cursor))); t += (z - cursor)
             key = ''.join(c for c in w_ if c.isalpha() or c == "'").lower()
             if key in v['pops']:
-                out.append(np.zeros(int(HOLD * SR), dtype=np.int16)); t += HOLD
+                out.append(np.zeros(int(0.45 * SR), dtype=np.int16)); t += 0.45
+                rw = workdir / 'r.wav'; rd = tts(w_.strip('.,;:!?"“”'), rw)
+                with wave.open(str(rw)) as w: out.append(np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16))
+                t += rd
+                out.append(np.zeros(int(0.7 * SR), dtype=np.int16)); t += 0.7
             cursor = z
         out.append(np.zeros(int(GAP * SR), dtype=np.int16)); t += GAP
     out.append(np.zeros(int(TAIL * SR), dtype=np.int16)); t += TAIL
@@ -211,7 +215,7 @@ def main():
             pg.screenshot(path=str(fr / f'{f:04d}.jpg'), type='jpeg', quality=92, clip=dict(x=0, y=0, width=1080, height=1920))
         mp4 = OUT / f"{v['id']}.mp4"
         subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-framerate', str(FPS), '-i', str(fr / '%04d.jpg'), '-i', str(wav),
-                        '-af', 'aresample=48000,volume=1.4', '-shortest',
+                        '-af', 'asetrate=22050*0.90,atempo=1.1111,aresample=48000,volume=1.6', '-shortest',
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-preset', 'medium', '-movflags', '+faststart', '-c:a', 'aac', '-b:a', '128k', str(mp4)], check=True)
         shutil.copy(fr / f'{int(2.5*FPS):04d}.jpg', OUT / f"{v['id']}_thumb.jpg")
         shutil.rmtree(fr); shutil.rmtree(work)
