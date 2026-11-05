@@ -215,7 +215,7 @@ def main():
             pg.screenshot(path=str(fr / f'{f:04d}.jpg'), type='jpeg', quality=92, clip=dict(x=0, y=0, width=1080, height=1920))
         mp4 = OUT / f"{v['id']}.mp4"
         subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-framerate', str(FPS), '-i', str(fr / '%04d.jpg'), '-i', str(wav),
-                        '-af', 'asetrate=22050*0.90,atempo=1.1111,aresample=48000,volume=1.6', '-shortest',
+                        '-af', 'asetrate=22050*0.90,atempo=1.1111,aresample=48000,loudnorm=I=-14:TP=-1.5:LRA=11,aformat=channel_layouts=stereo', '-ac', '2', '-shortest',
                         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-preset', 'medium', '-movflags', '+faststart', '-c:a', 'aac', '-b:a', '128k', str(mp4)], check=True)
         shutil.copy(fr / f'{int(2.5*FPS):04d}.jpg', OUT / f"{v['id']}_thumb.jpg")
         shutil.rmtree(fr); shutil.rmtree(work)
